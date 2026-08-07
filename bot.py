@@ -11,6 +11,7 @@ from typing import Optional
 
 from telegram import Update, Message
 from telegram.constants import ParseMode, ChatAction
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -87,6 +88,37 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
 
+async def _publish_to_channel(context: ContextTypes.DEFAULT_TYPE, post_text: str) -> None:
+    """Publish the generated post to the channel.
+
+    Gemini is asked for Markdown-formatted text, but AI-generated Markdown can
+    end up with unbalanced/malformed entities (e.g. a stray '*' or '_') that
+    Telegram's legacy Markdown parser rejects with "Can't parse entities".
+    Rather than losing the post over a formatting glitch, retry once as plain
+    text (no parse_mode) so publishing still succeeds.
+    """
+    try:
+        await context.bot.send_message(
+            chat_id=Config.TELEGRAM_CHANNEL_ID,
+            text=post_text,
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=False,
+        )
+    except BadRequest as parse_exc:
+        if "can't parse entities" not in str(parse_exc).lower():
+            raise
+        logger.warning(
+            "Markdown parsing failed for generated post; resending as plain text: %s",
+            parse_exc,
+        )
+        await context.bot.send_message(
+            chat_id=Config.TELEGRAM_CHANNEL_ID,
+            text=post_text,
+            parse_mode=None,
+            disable_web_page_preview=False,
+        )
+
+
 async def handle_airdrop_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message: Optional[Message] = update.message
     if not message or not message.text or not update.effective_user:
@@ -115,12 +147,7 @@ async def handle_airdrop_link(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         post_text = await generate_airdrop_post(airdrop_link)
 
-        await context.bot.send_message(
-            chat_id=Config.TELEGRAM_CHANNEL_ID,
-            text=post_text,
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=False,
-        )
+        await _publish_to_channel(context, post_text)
 
         await status_msg.edit_text(
             "✅ Post generated and published to the channel successfully!"
@@ -134,8 +161,7 @@ async def handle_airdrop_link(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as exc:
         logger.exception("Failed to process airdrop link")
         await status_msg.edit_text(
-            f"❌ Failed to generate or publish the post.\n\nError: `{exc}`",
-            parse_mode=ParseMode.MARKDOWN,
+            f"❌ Failed to generate or publish the post.\n\nError: {exc}"
         )
 
 
