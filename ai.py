@@ -1,5 +1,5 @@
 """
-AI module – generates professional Telegram airdrop posts using Gemini 2.5 Flash.
+AI module – generates professional Telegram airdrop posts using Gemini 3.6 Flash.
 """
 
 from __future__ import annotations
@@ -11,6 +11,13 @@ from google.genai import types
 from config import Config
 
 logger = logging.getLogger(__name__)
+
+# gemini-2.5-flash is no longer available to new users/API keys (Google returns
+# a 404 NOT_FOUND). gemini-3.6-flash is the current generally-available (GA)
+# replacement, so it's used directly here regardless of Config.GEMINI_MODEL to
+# guarantee the bot keeps working even if that env var still points at an
+# old/deprecated model name.
+GEMINI_MODEL = "gemini-3.6-flash"
 
 SYSTEM_INSTRUCTION = """You are an expert crypto community manager and professional Telegram content writer.
 Your task is to turn an airdrop / claim link into a polished, engaging Telegram channel post.
@@ -43,12 +50,13 @@ async def generate_airdrop_post(airdrop_link: str) -> str:
 
     try:
         response = await client.aio.models.generate_content(
-            model=Config.GEMINI_MODEL,
+            model=GEMINI_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
-                temperature=0.7,
-                top_p=0.95,
+                # Gemini 3.x models (including 3.6 Flash) are tuned for their
+                # default sampling behavior; temperature/top_p/top_k are no
+                # longer set here per Google's Gemini 3.x migration guidance.
                 max_output_tokens=1024,
             ),
         )
